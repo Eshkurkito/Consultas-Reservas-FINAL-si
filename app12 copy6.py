@@ -1092,17 +1092,31 @@ if mode == "KPIs por meses":
 
 #EVOLUCION POR FECHA DE CORTE#
 
+# =============================
+# MODO: Evolución por fecha de corte
+# =============================
+
+# =========================
+# MODO: Evolución por fecha de corte
+# =========================
 elif mode == "Evolución por fecha de corte":
     if raw is None:
         st.stop()
 
-    # --------------------------
-    # Controles (sidebar)
-    # --------------------------
+    import altair as alt
+
     with st.sidebar:
         st.header("Rango de corte")
-        evo_cut_start = st.date_input("Inicio de corte", value=date.today().replace(day=1), key="evo_cut_start")
-        evo_cut_end   = st.date_input("Fin de corte", value=date.today(), key="evo_cut_end")
+        evo_cut_start = st.date_input(
+            "Inicio de corte",
+            value=date.today().replace(day=1),
+            key="evo_cut_start",
+        )
+        evo_cut_end = st.date_input(
+            "Fin de corte",
+            value=date.today(),
+            key="evo_cut_end",
+        )
 
         st.header("Periodo objetivo")
         evo_target_start, evo_target_end = period_inputs(
@@ -1118,37 +1132,32 @@ elif mode == "Evolución por fecha de corte":
             default=[],
             key="props_evo"
         )
-
         inv_e = st.number_input("Inventario actual (opcional)", min_value=0, value=0, step=1, key="inv_evo")
         inv_e_prev = st.number_input("Inventario año anterior (opcional)", min_value=0, value=0, step=1, key="inv_evo_prev")
 
         kpis_sel = st.multiselect(
             "KPIs a mostrar",
-            options=["Ocupación %", "ADR (€)", "RevPAR (€)"],
+            ["Ocupación %", "ADR (€)", "RevPAR (€)"],
             default=["Ocupación %"],
-            key="kpis_sel_evo"
+            key="kpis_evo"
         )
-
         compare_e = st.checkbox("Comparar con año anterior (alineado por día)", value=False, key="cmp_evo")
 
-        col_btn1, col_btn2 = st.columns([1,1])
-        with col_btn1:
-            run_evo = st.button("Calcular evolución", type="primary", key="btn_evo")
-        with col_btn2:
-            reset_zoom = st.button("🔄 Reset zoom", key="btn_evo_reset")
+        st.markdown("—")
+        reset_zoom = st.button("🔄 Reset zoom", key="btn_evo_reset")
+        run_evo = st.button("Calcular evolución", type="primary", key="btn_evo")
 
     st.subheader("📉 Evolución de KPIs vs fecha de corte")
+    help_block("Evolución por corte")
 
     if run_evo:
         cut_start_ts = pd.to_datetime(evo_cut_start)
-        cut_end_ts   = pd.to_datetime(evo_cut_end)
+        cut_end_ts = pd.to_datetime(evo_cut_end)
         if cut_start_ts > cut_end_ts:
             st.error("El inicio del rango de corte no puede ser posterior al fin.")
             st.stop()
 
-        # --------------------------
-        # Serie ACTUAL (por corte)
-        # --------------------------
+        # --- Serie ACTUAL (para cada fecha de corte dentro del rango)
         rows_e = []
         for c in pd.date_range(cut_start_ts, cut_end_ts, freq="D"):
             _bp, tot_c = compute_kpis(
@@ -1160,29 +1169,25 @@ elif mode == "Evolución por fecha de corte":
                 filter_props=props_e if props_e else None,
             )
             rows_e.append({
-                "Corte": c.normalize(),
-                "ocupacion_pct": tot_c["ocupacion_pct"],
-                "adr": tot_c["adr"],
-                "revpar": tot_c["revpar"],
-                "ingresos": tot_c["ingresos"],
-                "noches_ocupadas": tot_c["noches_ocupadas"],
-                "noches_disponibles": tot_c["noches_disponibles"],
+                "Corte": pd.to_datetime(c).normalize(),
+                "ocupacion_pct": float(tot_c["ocupacion_pct"]),
+                "adr": float(tot_c["adr"]),
+                "revpar": float(tot_c["revpar"]),
+                "ingresos": float(tot_c["ingresos"]),
             })
         df_evo = pd.DataFrame(rows_e)
         if df_evo.empty:
             st.info("No hay datos para el rango seleccionado.")
             st.stop()
-        df_evo["Corte"] = pd.to_datetime(df_evo["Corte"])
 
-        # --------------------------
-        # Serie LY (opcional)
-        # --------------------------
+        # --- Serie LY (opcional), alineada al año actual
+        df_prev = pd.DataFrame()
         if compare_e:
             rows_prev = []
             cut_start_prev = cut_start_ts - pd.DateOffset(years=1)
-            cut_end_prev   = cut_end_ts - pd.DateOffset(years=1)
+            cut_end_prev = cut_end_ts - pd.DateOffset(years=1)
             target_start_prev = pd.to_datetime(evo_target_start) - pd.DateOffset(years=1)
-            target_end_prev   = pd.to_datetime(evo_target_end) - pd.DateOffset(years=1)
+            target_end_prev = pd.to_datetime(evo_target_end) - pd.DateOffset(years=1)
 
             for c in pd.date_range(cut_start_prev, cut_end_prev, freq="D"):
                 _bp2, tot_c2 = compute_kpis(
@@ -1194,174 +1199,230 @@ elif mode == "Evolución por fecha de corte":
                     filter_props=props_e if props_e else None,
                 )
                 rows_prev.append({
-                    "Corte": (pd.to_datetime(c).normalize() + pd.DateOffset(years=1)),  # alineado al año actual
-                    "ocupacion_pct_prev": tot_c2["ocupacion_pct"],
-                    "adr_prev": tot_c2["adr"],
-                    "revpar_prev": tot_c2["revpar"],
+                    "Corte": (pd.to_datetime(c).normalize() + pd.DateOffset(years=1)),  # alinea a eje actual
+                    "ocupacion_pct_prev": float(tot_c2["ocupacion_pct"]),
+                    "adr_prev": float(tot_c2["adr"]),
+                    "revpar_prev": float(tot_c2["revpar"]),
                 })
             df_prev = pd.DataFrame(rows_prev)
-            if not df_prev.empty:
-                df_prev["Corte"] = pd.to_datetime(df_prev["Corte"])
-                df_evo = df_evo.merge(df_prev, on="Corte", how="left")
 
-        # --------------------------
-        # Gráfica Altair (ejes según selección)
-        # --------------------------
-        import altair as alt
+        # ==========================
+        # Construcción del gráfico
+        # ==========================
+        # Selecciones (zoom + hover)
+        # Nota: si pulsas "Reset zoom", Altair crea un sel nuevo (clave distinta) y vuelve a vista inicial.
+        zoom_x = alt.selection_interval(bind="scales", encodings=["x"], name=("z" + (str(pd.Timestamp.now().value) if reset_zoom else "")))
+        nearest = alt.selection(type="single", nearest=True, on="mousemove",
+                                fields=["Corte"], empty="none")
 
-        # Eje X + tooltips base
-        x_enc = alt.X("Corte:T", title="Fecha de corte",
-                      axis=alt.Axis(labelOverlap=True, labelAngle=0, format="%d %b"))
+        layers = []
 
-        # Para asegurar que SIEMPRE ves la fecha al pasar el ratón,
-        # añadimos puntos “invisibles” (opacity=0) con tooltip.
-        def hover_points(df, yfield, title):
-            return (
-                alt.Chart(df)
-                .mark_point(size=60, opacity=0)  # amplia área de hover
+        # --- Línea de Ocupación (eje izquierdo %)
+        if "Ocupación %" in kpis_sel:
+            chart_occ = (
+                alt.Chart(df_evo)
+                .mark_line(strokeWidth=2)
                 .encode(
-                    x=x_enc,
-                    y=alt.Y(f"{yfield}:Q", title=title),
+                    x=alt.X("Corte:T", title="Fecha de corte"),
+                    y=alt.Y("ocupacion_pct:Q", title="Ocupación %"),
+                    color=alt.value("#1f77b4"),
                     tooltip=[
                         alt.Tooltip("Corte:T", title="Corte", format="%Y-%m-%d"),
-                        alt.Tooltip(f"{yfield}:Q", title=title, format=",.2f"),
+                        alt.Tooltip("ocupacion_pct:Q", title="Ocupación %", format=".2f"),
                     ],
                 )
             )
+            layers.append(chart_occ)
 
-        layers_left = []
-        layers_right = []
+            if compare_e and not df_prev.empty:
+                chart_occ_prev = (
+                    alt.Chart(df_prev)
+                    .mark_line(strokeWidth=1.5, opacity=0.35)
+                    .encode(
+                        x="Corte:T",
+                        y=alt.Y("ocupacion_pct_prev:Q", title="Ocupación %"),
+                        color=alt.value("#1f77b4"),
+                        tooltip=[
+                            alt.Tooltip("Corte:T", title="Corte", format="%Y-%m-%d"),
+                            alt.Tooltip("ocupacion_pct_prev:Q", title="Ocupación % (LY)", format=".2f"),
+                        ],
+                    )
+                )
+                layers.append(chart_occ_prev)
 
-        # Reglas de ejes:
-        # - Si SOLO hay 1 KPI: ese KPI va SIEMPRE al eje IZQUIERDO.
-        # - Si hay varios: Ocupación % (si está) va a IZQUIERDO; ADR y RevPAR pasan a DERECHO.
-        single_kpi = len(kpis_sel) == 1
+        # --- Series en € (ADR / RevPAR) en eje derecho único
+        right_labels = [k for k in ["ADR (€)", "RevPAR (€)"] if k in kpis_sel]
+        if len(right_labels) > 0:
+            # NOW (largo)
+            right_map_now = []
+            if "ADR (€)" in kpis_sel:
+                tmp = df_evo[["Corte", "adr"]].rename(columns={"adr": "valor"})
+                tmp["Serie"] = "ADR (€)"
+                right_map_now.append(tmp)
+            if "RevPAR (€)" in kpis_sel:
+                tmp = df_evo[["Corte", "revpar"]].rename(columns={"revpar": "valor"})
+                tmp["Serie"] = "RevPAR (€)"
+                right_map_now.append(tmp)
+            df_right_now = pd.concat(right_map_now, ignore_index=True)
 
-        # Helper para decidir a qué lado va un KPI
-        def side_for(metric_name: str) -> str:
-            if single_kpi:
-                # único KPI → siempre izquierda
-                return "left"
-            # múltiples KPIs:
-            if metric_name == "Ocupación %":
-                return "left"
-            # ADR/RevPAR comparten derecha
-            return "right"
+            # Axis title: si hay dos, genérico "€"
+            axis_title = right_labels[0] if len(right_labels) == 1 else "€"
 
-        # === Ocupación ===
+            color_scale = alt.Scale(
+                domain=["ADR (€)", "RevPAR (€)"],
+                range=["#ff7f0e", "#2ca02c"]
+            )
+
+            chart_right = (
+                alt.Chart(df_right_now)
+                .mark_line(strokeWidth=2)
+                .encode(
+                    x=alt.X("Corte:T", title="Fecha de corte"),
+                    y=alt.Y("valor:Q", title=axis_title, axis=alt.Axis(orient="right")),
+                    color=alt.Color("Serie:N", scale=color_scale, legend=alt.Legend(title="Serie")),
+                    tooltip=[
+                        alt.Tooltip("Corte:T", title="Corte", format="%Y-%m-%d"),
+                        alt.Tooltip("Serie:N", title="KPI"),
+                        alt.Tooltip("valor:Q", title="Valor (€)", format=".2f"),
+                    ],
+                )
+            )
+            layers.append(chart_right)
+
+            # LY (largo)
+            if compare_e and not df_prev.empty:
+                right_map_prev = []
+                if "ADR (€)" in kpis_sel and "adr_prev" in df_prev.columns:
+                    tmp = df_prev[["Corte", "adr_prev"]].rename(columns={"adr_prev": "valor"})
+                    tmp["Serie"] = "ADR (€)"
+                    right_map_prev.append(tmp)
+                if "RevPAR (€)" in kpis_sel and "revpar_prev" in df_prev.columns:
+                    tmp = df_prev[["Corte", "revpar_prev"]].rename(columns={"revpar_prev": "valor"})
+                    tmp["Serie"] = "RevPAR (€)"
+                    right_map_prev.append(tmp)
+                if right_map_prev:
+                    df_right_prev = pd.concat(right_map_prev, ignore_index=True)
+                    chart_right_prev = (
+                        alt.Chart(df_right_prev)
+                        .mark_line(strokeWidth=1.5, opacity=0.35)
+                        .encode(
+                            x="Corte:T",
+                            y=alt.Y("valor:Q", title=axis_title, axis=alt.Axis(orient="right")),
+                            color=alt.Color("Serie:N", scale=color_scale, legend=None),
+                            tooltip=[
+                                alt.Tooltip("Corte:T", title="Corte", format="%Y-%m-%d"),
+                                alt.Tooltip("Serie:N", title="KPI"),
+                                alt.Tooltip("valor:Q", title="Valor (LY)", format=".2f"),
+                            ],
+                        )
+                    )
+                    layers.append(chart_right_prev)
+
+        # --- Regla vertical + puntos de hover
+        rule = (
+            alt.Chart(df_evo)
+            .mark_rule(color="#999")
+            .encode(x="Corte:T")
+            .add_params(nearest)
+            .transform_filter(nearest)
+        )
+
+        hover_layers = []
+
         if "Ocupación %" in kpis_sel:
-            if side_for("Ocupación %") == "left":
-                layers_left.append(
-                    alt.Chart(df_evo).mark_line(strokeWidth=2, color="#1f77b4")
-                    .encode(x=x_enc, y=alt.Y("ocupacion_pct:Q", title="Ocupación %", axis=alt.Axis(format=".0f")))
+            hover_layers.append(
+                alt.Chart(df_evo)
+                .mark_circle(size=64, filled=True, color="#1f77b4")
+                .encode(x="Corte:T", y="ocupacion_pct:Q")
+                .transform_filter(nearest)
+            )
+            if compare_e and not df_prev.empty:
+                hover_layers.append(
+                    alt.Chart(df_prev)
+                    .mark_circle(size=48, filled=True, color="#1f77b4", opacity=0.35)
+                    .encode(x="Corte:T", y="ocupacion_pct_prev:Q")
+                    .transform_filter(nearest)
                 )
-                layers_left.append(hover_points(df_evo, "ocupacion_pct", "Ocupación %"))
-                if compare_e and "ocupacion_pct_prev" in df_evo.columns:
-                    layers_left.append(
-                        alt.Chart(df_evo).mark_line(strokeWidth=1.5, opacity=0.35, color="#1f77b4")
-                        .encode(x=x_enc, y=alt.Y("ocupacion_pct_prev:Q", title="Ocupación %", axis=alt.Axis(format=".0f")))
-                    )
-                    layers_left.append(hover_points(df_evo, "ocupacion_pct_prev", "Ocupación % (prev)"))
 
-        # === ADR ===
-        if "ADR (€)" in kpis_sel:
-            if side_for("ADR (€)") == "left":
-                # Caso: ADR es único KPI → eje izquierdo
-                layers_left.append(
-                    alt.Chart(df_evo).mark_line(strokeWidth=2, strokeDash=[5, 3], color="#ff7f0e")
-                    .encode(x=x_enc, y=alt.Y("adr:Q", title="ADR (€)", axis=alt.Axis(format=",.2f")))
+        if len(right_labels) > 0:
+            # Puntos actuales (en largo)
+            hover_layers.append(
+                alt.Chart(df_right_now)
+                .mark_circle(size=60, filled=True)
+                .encode(
+                    x="Corte:T",
+                    y="valor:Q",
+                    color=alt.Color("Serie:N", scale=color_scale, legend=None),
                 )
-                layers_left.append(hover_points(df_evo, "adr", "ADR (€)"))
-                if compare_e and "adr_prev" in df_evo.columns:
-                    layers_left.append(
-                        alt.Chart(df_evo).mark_line(strokeWidth=1.5, strokeDash=[2, 2], opacity=0.35, color="#ff7f0e")
-                        .encode(x=x_enc, y=alt.Y("adr_prev:Q", title="ADR (€)", axis=alt.Axis(format=",.2f")))
+                .transform_filter(nearest)
+            )
+            if compare_e and not df_prev.empty and ('df_right_prev' in locals()):
+                hover_layers.append(
+                    alt.Chart(df_right_prev)
+                    .mark_circle(size=48, filled=True, opacity=0.45)
+                    .encode(
+                        x="Corte:T",
+                        y="valor:Q",
+                        color=alt.Color("Serie:N", scale=color_scale, legend=None),
                     )
-                    layers_left.append(hover_points(df_evo, "adr_prev", "ADR (€) (prev)"))
-            else:
-                # Va al eje derecho
-                layers_right.append(
-                    alt.Chart(df_evo).mark_line(strokeWidth=2, strokeDash=[5, 3], color="#ff7f0e")
-                    .encode(x=x_enc, y=alt.Y("adr:Q", title="ADR (€)", axis=alt.Axis(orient="right", format=",.2f")))
+                    .transform_filter(nearest)
                 )
-                layers_right.append(hover_points(df_evo, "adr", "ADR (€)"))
-                if compare_e and "adr_prev" in df_evo.columns:
-                    layers_right.append(
-                        alt.Chart(df_evo).mark_line(strokeWidth=1.5, strokeDash=[2, 2], opacity=0.35, color="#ff7f0e")
-                        .encode(x=x_enc, y=alt.Y("adr_prev:Q", title="ADR (€)", axis=alt.Axis(orient="right", format=",.2f")))
-                    )
-                    layers_right.append(hover_points(df_evo, "adr_prev", "ADR (€) (prev)"))
 
-        # === RevPAR ===
-        if "RevPAR (€)" in kpis_sel:
-            if side_for("RevPAR (€)") == "left":
-                # Caso: RevPAR es único KPI → eje izquierdo
-                layers_left.append(
-                    alt.Chart(df_evo).mark_line(strokeWidth=2, strokeDash=[2, 1], color="#2ca02c")
-                    .encode(x=x_enc, y=alt.Y("revpar:Q", title="RevPAR (€)", axis=alt.Axis(format=",.2f")))
-                )
-                layers_left.append(hover_points(df_evo, "revpar", "RevPAR (€)"))
-                if compare_e and "revpar_prev" in df_evo.columns:
-                    layers_left.append(
-                        alt.Chart(df_evo).mark_line(strokeWidth=1.5, strokeDash=[2, 1], opacity=0.35, color="#2ca02c")
-                        .encode(x=x_enc, y=alt.Y("revpar_prev:Q", title="RevPAR (€)", axis=alt.Axis(format=",.2f")))
-                    )
-                    layers_left.append(hover_points(df_evo, "revpar_prev", "RevPAR (€) (prev)"))
-            else:
-                # Va al eje derecho (compartido con ADR)
-                layers_right.append(
-                    alt.Chart(df_evo).mark_line(strokeWidth=2, strokeDash=[2, 1], color="#2ca02c")
-                    .encode(x=x_enc, y=alt.Y("revpar:Q", title="RevPAR (€)", axis=alt.Axis(orient="right", format=",.2f")))
-                )
-                layers_right.append(hover_points(df_evo, "revpar", "RevPAR (€)"))
-                if compare_e and "revpar_prev" in df_evo.columns:
-                    layers_right.append(
-                        alt.Chart(df_evo).mark_line(strokeWidth=1.5, strokeDash=[2, 1], opacity=0.35, color="#2ca02c")
-                        .encode(x=x_enc, y=alt.Y("revpar_prev:Q", title="RevPAR (€)", axis=alt.Axis(orient="right", format=",.2f")))
-                    )
-                    layers_right.append(hover_points(df_evo, "revpar_prev", "RevPAR (€) (prev)"))
+        # Montaje final
+        chart = alt.layer(*layers, *hover_layers, rule).add_params(zoom_x)
 
-        # Selección para pan/zoom SOLO en X
-        zoom_x = alt.selection_interval(bind='scales', encodings=['x'])
+        # Ejes sincronizados o único eje
+        if ("Ocupación %" in kpis_sel) and (len(right_labels) > 0):
+            chart = chart.resolve_scale(y="independent")   # % a la izq, € a la dcha
+        else:
+            chart = chart.resolve_scale(y="shared")        # un solo eje
 
-        # Capas finales
-        all_layers = layers_left + layers_right
-        if not all_layers:
-            st.info("Selecciona al menos un KPI.")
-            st.stop()
+        st.altair_chart(chart.properties(height=360), use_container_width=True)
 
-        chart = alt.layer(*all_layers).add_params(zoom_x)
+        # ====== Tabla y export ======
+        # Mapa simple para tabla rápida si te interesa mantenerlo:
+        metric_map = {
+            "Ocupación %": "ocupacion_pct",
+            "ADR (€)": "adr",
+            "RevPAR (€)": "revpar",
+        }
+        # elegimos la 1ª seleccionada solo para una mini tabla rápida
+        if len(kpis_sel) > 0:
+            key_col = metric_map[kpis_sel[0]]
+            quick = pd.DataFrame({"Actual": df_evo[key_col].values}, index=pd.to_datetime(df_evo["Corte"]))
+            if compare_e:
+                prev_col = key_col + "_prev"
+                if (not df_prev.empty) and (prev_col in df_prev.columns):
+                    # alinear por Corte
+                    merged_prev = df_prev.set_index("Corte")[prev_col].reindex(quick.index)
+                    quick["Año anterior"] = merged_prev.values
+            # st.line_chart(quick, height=220)  # opcional
 
-        # Escalas: si hay KPIs a ambos lados → ejes y independientes; si sólo uno → compartido
-        y_resolve = "independent" if (len(layers_left) > 0 and len(layers_right) > 0) else "shared"
-        chart = chart.resolve_scale(y=y_resolve).properties(height=380)
+        # Tabla completa para auditoría
+        show_cols = ["Corte", "ocupacion_pct", "adr", "revpar", "ingresos"]
+        if compare_e and not df_prev.empty:
+            df_all = df_evo.merge(df_prev, on="Corte", how="left")
+            show_cols += ["ocupacion_pct_prev", "adr_prev", "revpar_prev"]
+            show_df = df_all[show_cols].rename(columns={
+                "ocupacion_pct": "Ocupación %",
+                "adr": "ADR (€)",
+                "revpar": "RevPAR (€)",
+                "ingresos": "Ingresos (€)",
+                "ocupacion_pct_prev": "Ocupación % (LY)",
+                "adr_prev": "ADR (€) (LY)",
+                "revpar_prev": "RevPAR (€) (LY)",
+            })
+        else:
+            show_df = df_evo[show_cols].rename(columns={
+                "ocupacion_pct": "Ocupación %",
+                "adr": "ADR (€)",
+                "revpar": "RevPAR (€)",
+                "ingresos": "Ingresos (€)",
+            })
 
-        st.altair_chart(chart, use_container_width=True)
-
-        # --------------------------
-        # Tabla + Export
-        # --------------------------
-        cols = [
-            "Corte", "noches_ocupadas", "noches_disponibles",
-            "ocupacion_pct", "adr", "revpar", "ingresos"
-        ]
-        if compare_e:
-            cols += ["ocupacion_pct_prev", "adr_prev", "revpar_prev"]
-
-        show_df = df_evo[cols].rename(columns={
-            "noches_ocupadas": "Noches ocupadas",
-            "noches_disponibles": "Noches disponibles",
-            "ocupacion_pct": "Ocupación %",
-            "adr": "ADR (€)",
-            "revpar": "RevPAR (€)",
-            "ingresos": "Ingresos (€)",
-            "ocupacion_pct_prev": "Ocupación % (prev)",
-            "adr_prev": "ADR (€) (prev)",
-            "revpar_prev": "RevPAR (€) (prev)",
-        })
         st.dataframe(show_df, use_container_width=True)
 
-        csve = df_evo.to_csv(index=False).encode("utf-8-sig")
+        csve = show_df.to_csv(index=False).encode("utf-8-sig")
         st.download_button("📥 Descargar evolución (CSV)", data=csve, file_name="evolucion_kpis.csv", mime="text/csv")
 
     else:
