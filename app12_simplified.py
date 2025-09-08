@@ -848,7 +848,7 @@ METRIC_MAP = {"Ocupación %": "ocupacion_pct", "ADR (€)": "adr", "RevPAR (€)
 # =============================
 # Vista combinada: Pickup & Pace
 # =============================
-elif mode == "Pickup & Pace":
+if mode == "Pickup & Pace":
     if raw is None:
         st.stop()
     from datetime import date
