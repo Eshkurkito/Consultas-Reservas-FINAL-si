@@ -2948,101 +2948,136 @@ elif mode == "Informe de propietario (PDF)":
     st.divider()
 
     # --- Generación PDF (ReportLab) ---
-    try:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib import colors
-        from reportlab.pdfgen import canvas
-        from reportlab.lib.units import cm
-        from reportlab.lib.styles import ParagraphStyle
-        from reportlab.platypus import Paragraph, Frame, Spacer
+# --- Generación PDF con fpdf2 (ligero y fácil de instalar) ---
+try:
+    from fpdf import FPDF
+    import io
 
-        BRAND = colors.HexColor("#163e64")
-        LIGHT = colors.HexColor("#f5f5f5")
-        DARK  = colors.HexColor("#333333")
+    BRAND_HEX = "#163e64"
 
-        def _header_footer(c, page_num, W, H):
-            c.setFillColor(BRAND); c.rect(0, 0, 0.9*cm, H, stroke=0, fill=1)
-            c.setFillColor(BRAND); c.rect(0.9*cm, 1.1*cm, W-1.8*cm, 0.03*cm, stroke=0, fill=1)
-            c.setFillColor(DARK);  c.setFont("Helvetica", 8.5)
-            c.drawString(1.2*cm, 0.75*cm, "FLORIT FLATS • Informe de Propietario")
-            c.drawRightString(W-1.2*cm, 0.75*cm, f"Página {page_num}")
+    def hex_to_rgb(hex_str: str):
+        hex_str = hex_str.strip("#")
+        return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4))
 
-        def _page_cover(c, W, H, periodo_txt, propietario_txt, propiedad_txt):
-            _header_footer(c, 1, W, H)
-            c.setFillColor(BRAND); c.setFont("Helvetica-Bold", 28)
-            c.drawString(1.6*cm, H-4.2*cm, "Informe de Propietario")
-            c.setFillColor(DARK);  c.setFont("Helvetica", 12.5)
-            c.drawString(1.6*cm, H-5.2*cm, f"Periodo: {periodo_txt}")
-            c.drawString(1.6*cm, H-5.9*cm, f"Propietario: {propietario_txt}")
-            c.drawString(1.6*cm, H-6.6*cm, f"Propiedad: {propiedad_txt}")
-            c.setFillColor(LIGHT); c.roundRect(1.6*cm, H-15*cm, W-3.2*cm, 7.2*cm, 10, stroke=0, fill=1)
-            c.setFillColor(BRAND); c.setFont("Helvetica-Bold", 14)
-            c.drawString(2.2*cm, H-8.4*cm, "Vista general del mes")
-            c.setFillColor(DARK);  c.setFont("Helvetica", 11)
-            c.drawString(2.2*cm, H-9.2*cm, "Espacio para foto (Canva) o gráfico (PNG).")
-            c.showPage()
+    class OwnerReport(FPDF):
+        def header(self):
+            # Barra lateral marca
+            r,g,b = hex_to_rgb(BRAND_HEX)
+            self.set_fill_color(r, g, b)
+            self.rect(x=10, y=10, w=5, h=277, style="F")  # barra vertical
+            # Línea footer superior (se dibuja en footer)
+            # Logo opcional: si quieres, self.image("logo.png", x=?, y=?, w=?)
 
-        def _page_summary_kpis(c, W, H, tot_dict):
-            _header_footer(c, 2, W, H)
-            title = ParagraphStyle("H2", fontName="Helvetica-Bold", fontSize=16, textColor=BRAND, spaceAfter=6)
-            body  = ParagraphStyle("B",  fontName="Helvetica",      fontSize=10.5, leading=14, textColor=DARK)
-            kpiV  = ParagraphStyle("KV", fontName="Helvetica-Bold", fontSize=18, textColor=BRAND, alignment=1)
-            kpiL  = ParagraphStyle("KL", fontName="Helvetica",      fontSize=9,  textColor=DARK, alignment=1)
+        def footer(self):
+            # Línea low footer
+            r,g,b = hex_to_rgb(BRAND_HEX)
+            self.set_y(-20)
+            self.set_fill_color(r, g, b)
+            self.rect(x=15, y=self.get_y()+8, w=180, h=1.2, style="F")
+            # Texto footer
+            self.set_y(-15)
+            self.set_text_color(51,51,51)
+            self.set_font("Helvetica", size=8)
+            self.cell(0, 10, "FLORIT FLATS • Informe de Propietario", 0, 0, "L")
+            self.cell(0, 10, f"Página {self.page_no()}", 0, 0, "R")
 
-            frame = Frame(1.6*cm, H-6*cm, W-3.2*cm, 4.2*cm, showBoundary=0)
-            story = [
-                Paragraph("Resumen ejecutivo", title),
-                Paragraph(
-                    f"En <b>{mes_text}</b>, la ocupación fue del <b>{tot_dict['ocupacion_pct']:.2f}%</b>, "
-                    f"el ADR se situó en <b>{tot_dict['adr']:.2f} €</b> y el RevPAR en <b>{tot_dict['revpar']:.2f} €</b>, "
-                    f"generando unos ingresos totales de <b>{tot_dict['ingresos']:.2f} €</b>.",
-                    body
-                ),
-                Paragraph("Principales drivers: [canales/eventos/segmentos].", body),
-            ]
-            frame.addFromList(story, c)
+    pdf = OwnerReport(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
 
-            # KPIs (6 tarjetas)
-            labels = [
-                ("Ocupación (%)", f"{tot_dict['ocupacion_pct']:.2f}%"),
-                ("ADR (€)",       f"{tot_dict['adr']:.2f}"),
-                ("RevPAR (€)",    f"{tot_dict['revpar']:.2f}"),
-                ("Ingresos (€)",  f"{tot_dict['ingresos']:.2f}"),
-                ("Noches ocupadas", f"{tot_dict['noches_ocupadas']}"),
-                ("Noches disponibles", f"{tot_dict['noches_disponibles']}"),
-            ]
-            top = H-12.5*cm; left = 1.6*cm
-            card_w = (W-3.2*cm-1.2*cm)/3; card_h = 2.5*cm
-            for i, (lab, val) in enumerate(labels):
-                col, row = i % 3, i // 3
-                x = left + col*(card_w+0.6*cm)
-                y = top - row*(card_h+0.6*cm)
-                c.setFillColor(colors.white); c.roundRect(x, y, card_w, card_h, 8, stroke=1, fill=1)
-                c.setFillColor(BRAND); c.roundRect(x, y+card_h-0.35*cm, card_w, 0.35*cm, 8, stroke=0, fill=1)
-                f = Frame(x, y+0.25*cm, card_w, card_h-0.8*cm, showBoundary=0)
-                f.addFromList([Paragraph(val, kpiV), Spacer(1,2), Paragraph(lab, kpiL)], c)
-            c.showPage()
+    # -------- Portada --------
+    pdf.add_page()
+    r,g,b = hex_to_rgb(BRAND_HEX)
+    pdf.set_text_color(r,g,b)
+    pdf.set_font("Helvetica", "B", 22)
+    pdf.set_xy(25, 30)
+    pdf.cell(0, 10, "Informe de Propietario", ln=1)
 
-        # --- Build PDF in-memory ---
-        import io
-        buff = io.BytesIO()
-        c = canvas.Canvas(buff, pagesize=A4)
-        W, H = A4
+    pdf.set_text_color(51,51,51)
+    pdf.set_font("Helvetica", "", 12)
+    pdf.set_xy(25, 45)
+    pdf.cell(0, 8, f"Periodo: {mes_text}", ln=1)
+    pdf.cell(0, 8, f"Propietario: {propietario}", ln=1)
+    pdf.cell(0, 8, f"Propiedad: {propiedad}", ln=1)
 
-        _page_cover(c, W, H, mes_text, propietario, propiedad)
-        _page_summary_kpis(c, W, H, tot)
-        c.save()
-        pdf_bytes = buff.getvalue()
-        buff.close()
+    # Caja “hero” placeholder (para imagen Canva o gráfico PNG)
+    pdf.set_xy(25, 80)
+    pdf.set_draw_color(220,220,220)
+    pdf.set_fill_color(245,245,245)
+    pdf.cell(160, 60, "", border=1, fill=True, ln=1)
+    pdf.set_xy(25, 110)
+    pdf.set_text_color(51,51,51)
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(160, 8, "Espacio para foto (Canva) o gráfico (PNG).", ln=1, align="C")
 
-        st.download_button(
-            "📄 Descargar Informe PDF",
-            data=pdf_bytes,
-            file_name=f"Informe_Propietario_{mes_text.replace(' ','_')}.pdf",
-            mime="application/pdf",
-            type="primary"
-        )
-        st.success("Informe generado. Próximo paso: insertar gráficos/heatmap en PNG cuando quieras.")
-    except Exception as e:
-        st.error(f"No se pudo generar el PDF ({e}).")
-        st.info("Añade a tu requirements.txt:  **reportlab==3.6.13**  y vuelve a ejecutar la app.")
+    # -------- Resumen & KPIs --------
+    pdf.add_page()
+    # Título
+    pdf.set_text_color(r,g,b)
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.set_xy(25, 20)
+    pdf.cell(0, 8, "Resumen ejecutivo", ln=1)
+
+    # Texto
+    pdf.set_text_color(51,51,51)
+    pdf.set_font("Helvetica", "", 11)
+    resumen = (
+        f"En {mes_text}, la ocupación fue del {tot.get('ocupacion_pct',0):.2f}%, "
+        f"el ADR se situó en {tot.get('adr',0):.2f} € y el RevPAR en {tot.get('revpar',0):.2f} €, "
+        f"generando unos ingresos totales de {tot.get('ingresos',0):.2f} €.\n"
+        "Principales drivers: [canales/eventos/segmentos]."
+    )
+    pdf.set_xy(25, 32)
+    pdf.multi_cell(160, 6, resumen)
+
+    # Tarjetas KPI (2 filas × 3 columnas)
+    def kpi_card(x, y, label, value):
+        # Marco
+        pdf.set_draw_color(200,200,200)
+        pdf.set_fill_color(255,255,255)
+        pdf.rect(x, y, 50, 28, style="DF")
+        # Tira superior
+        pdf.set_fill_color(r,g,b)
+        pdf.rect(x, y, 50, 5, style="F")
+        # Valor
+        pdf.set_xy(x, y+8)
+        pdf.set_text_color(r,g,b)
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(50, 8, value, align="C")
+        # Label
+        pdf.set_xy(x, y+18)
+        pdf.set_text_color(51,51,51)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.cell(50, 6, label, align="C")
+
+    labels_vals = [
+        ("Ocupación (%)", f"{tot.get('ocupacion_pct',0):.2f}%"),
+        ("ADR (€)",       f"{tot.get('adr',0):.2f}"),
+        ("RevPAR (€)",    f"{tot.get('revpar',0):.2f}"),
+        ("Ingresos (€)",  f"{tot.get('ingresos',0):.2f}"),
+        ("Noches ocupadas", f"{tot.get('noches_ocupadas',0)}"),
+        ("Noches disponibles", f"{tot.get('noches_disponibles',0)}"),
+    ]
+    # Coordenadas cards
+    x0, y0 = 25, 70
+    gap_x, gap_y = 10, 10
+    for i, (lab, val) in enumerate(labels_vals):
+        col, row = i % 3, i // 3
+        x = x0 + col*(50 + gap_x)
+        y = y0 + row*(28 + gap_y)
+        kpi_card(x, y, lab, val)
+
+    # Export a bytes
+    pdf_bytes = pdf.output(dest="S").encode("latin1")
+
+    st.download_button(
+        "📄 Descargar Informe PDF",
+        data=pdf_bytes,
+        file_name=f"Informe_Propietario_{mes_text.replace(' ','_')}.pdf",
+        mime="application/pdf",
+        type="primary"
+    )
+    st.success("Informe generado con fpdf2. Próximo paso: insertar gráficos/heatmap como PNG.")
+except Exception as e:
+    st.error(f"No se pudo generar el PDF con fpdf2 ({e}).")
+    st.info("Revisa que fpdf2 esté instalado (requirements.txt).")
+
