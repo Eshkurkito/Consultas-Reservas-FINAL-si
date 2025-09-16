@@ -847,6 +847,7 @@ mode = st.sidebar.radio(
         "Eventos & Festivos",
         "Tarificación (beta)",
         "Calendario de tarifas",
+        "ADR óptimo (beta)",
 
     ],
     key="mode_radio"
