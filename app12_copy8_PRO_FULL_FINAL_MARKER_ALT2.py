@@ -825,6 +825,7 @@ mode = st.sidebar.radio(
     "Modo de consulta",
     [
         "Consulta normal",
+        "Resumen Comparativo",
         "KPIs por meses",
         "Evolución por fecha de corte",
         "Pickup (entre dos cortes)",
@@ -995,6 +996,132 @@ if mode == "Consulta normal":
             "RevPAR (prev)", f"{total_cmp['revpar']:.2f}",
             delta=f"{total_n['revpar']-total_cmp['revpar']:.2f}"
         )
+# ---------- Resumen comparativo (por alojamiento) ----------
+elif mode == "Resumen comparativo":
+    if raw is None:
+        st.stop()
+
+    with st.sidebar:
+        st.header("Parámetros – Resumen comparativo")
+        cutoff_rc = st.date_input("Fecha de corte", value=date.today(), key="cut_resumen_comp")
+        start_rc, end_rc = period_inputs(
+            "Inicio del periodo", "Fin del periodo",
+            date(date.today().year, date.today().month, 1),
+            (pd.Timestamp.today().to_period("M").end_time).date(),
+            "resumen_comp"
+        )
+        props_rc = st.multiselect(
+            "Alojamientos (opcional)",
+            options=sorted(raw["Alojamiento"].unique()),
+            default=[],
+            key="props_resumen_comp"
+        )
+        run_rc = st.button("Calcular resumen comparativo", type="primary", key="btn_resumen_comp")
+
+    st.subheader("📊 Resumen comparativo por alojamiento")
+
+    if run_rc:
+        props_sel = props_rc if props_rc else None
+        days_period = (pd.to_datetime(end_rc) - pd.to_datetime(start_rc)).days + 1
+        days_period = max(days_period, 0)
+
+        def _by_prop_with_occ(cutoff_dt, start_dt, end_dt):
+            by_prop, _ = compute_kpis(
+                df_all=raw,
+                cutoff=pd.to_datetime(cutoff_dt),
+                period_start=pd.to_datetime(start_dt),
+                period_end=pd.to_datetime(end_dt),
+                inventory_override=None,
+                filter_props=props_sel
+            )
+            # by_prop tiene: Alojamiento | Noches ocupadas | Ingresos | ADR  (según tu compute_kpis) 
+            if by_prop.empty:
+                by_prop["Ocupación %"] = []
+            else:
+                by_prop["Ocupación %"] = np.where(
+                    days_period > 0,
+                    by_prop["Noches ocupadas"] / days_period * 100.0,
+                    0.0
+                )
+            return by_prop[["Alojamiento", "ADR", "Ocupación %", "Ingresos"]].copy()
+
+        # Actual
+        now_df = _by_prop_with_occ(cutoff_rc, start_rc, end_rc)
+        now_df = now_df.rename(columns={
+            "ADR": "ADR actual",
+            "Ocupación %": "Ocupación actual %",
+            "Ingresos": "Ingresos actuales (€)"
+        })
+
+        # LY (mismo periodo y cutoff -1 año)
+        ly_df = _by_prop_with_occ(
+            pd.to_datetime(cutoff_rc) - pd.DateOffset(years=1),
+            pd.to_datetime(start_rc) - pd.DateOffset(years=1),
+            pd.to_datetime(end_rc) - pd.DateOffset(years=1),
+        ).rename(columns={
+            "ADR": "ADR LY",
+            "Ocupación %": "Ocupación LY %",
+            "Ingresos": "Ingresos LY (€)"
+        })
+
+        # LY final (resultado) = mismo periodo LY, pero cutoff en el FIN del periodo LY
+        ly_final_df = _by_prop_with_occ(
+            pd.to_datetime(end_rc) - pd.DateOffset(years=1),   # corte en fin del periodo LY
+            pd.to_datetime(start_rc) - pd.DateOffset(years=1),
+            pd.to_datetime(end_rc) - pd.DateOffset(years=1),
+        ).rename(columns={
+            "ADR": "ADR LY (final)",              # no lo pediste, pero lo dejamos por si acaso
+            "Ocupación %": "Ocupación LY (final) %",
+            "Ingresos": "Ingresos finales LY (€)"
+        })[["Alojamiento", "Ingresos finales LY (€)"]]
+
+        # Merge total
+        resumen = now_df.merge(ly_df, on="Alojamiento", how="outer") \
+                        .merge(ly_final_df, on="Alojamiento", how="left")
+
+        # Orden de columnas limpio
+        cols_order = [
+            "Alojamiento",
+            "ADR actual", "ADR LY",
+            "Ocupación actual %", "Ocupación LY %",
+            "Ingresos actuales (€)", "Ingresos LY (€)",
+            "Ingresos finales LY (€)"
+        ]
+        resumen = resumen.reindex(columns=cols_order)
+
+        # Vista
+        st.dataframe(resumen, use_container_width=True)
+
+        # Descarga CSV
+        csv_bytes = resumen.to_csv(index=False).encode("utf-8-sig")
+        st.download_button("📥 Descargar CSV", data=csv_bytes,
+                           file_name="resumen_comparativo.csv", mime="text/csv")
+
+        # Descarga Excel (xlsx)
+        import io
+        buffer = io.BytesIO()
+        try:
+            with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                resumen.to_excel(writer, index=False, sheet_name="Resumen")
+                # Ajuste ancho columnas básico
+                wb = writer.book
+                ws = writer.sheets["Resumen"]
+                for i, col in enumerate(resumen.columns, start=1):
+                    ws.set_column(i-1, i-1, max(12, min(38, resumen[col].astype(str).str.len().max() or 12)))
+        except Exception:
+            # Fallback a openpyxl si no está xlsxwriter
+            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                resumen.to_excel(writer, index=False, sheet_name="Resumen")
+                # (openpyxl sin autosize; lo dejamos simple)
+        st.download_button(
+            "📥 Descargar Excel (.xlsx)",
+            data=buffer.getvalue(),
+            file_name="resumen_comparativo.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.caption("Configura parámetros y pulsa **Calcular resumen comparativo**.")
+
 # ===========================
 # BLOQUE 3/5 — KPIs por meses, Evolución por corte, Pickup, Pace, Predicción
 # ===========================
