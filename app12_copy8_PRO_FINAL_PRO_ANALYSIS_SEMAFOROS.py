@@ -2720,6 +2720,68 @@ elif mode == "Cuadro de mando (PRO)":
                     cols_h[i].metric(f"D-{D}", f"{now_v:.1f}% vs {ly_v:.1f}%", delta=f"{delta_pp:+.1f} pp")
                 else:
                     cols_h[i].metric(f"D-{D}", "—", delta="—")
+                    
+                        # === Resumen fácil del Pace: tabla de hitos + veredicto ===
+            st.markdown("#### 📊 Interpretación rápida del Pace (actual vs LY)")
+
+            def _nearest_value(df, D, col="ocupacion_pct"):
+                """Devuelve el valor en el D exacto; si no existe, usa el más cercano."""
+                if df is None or df.empty:
+                    return np.nan
+                r = df.loc[df["D"] == int(D), col]
+                if len(r):
+                    return float(r.values[0])
+                # más cercano
+                idx = (df["D"] - int(D)).abs().argsort().iloc[0]
+                return float(df.iloc[idx][col])
+
+            # Puedes incluir D-7 si quieres una lectura más last-minute
+            milestones_full = [60, 30, 14, 7]
+            rows_tbl = []
+            gaps_pp = []
+
+            for D in milestones_full:
+                now_v = _nearest_value(base_pace, D, "ocupacion_pct")
+                ly_v  = _nearest_value(ly_pace,   D, "ocupacion_pct")
+                gap_pp = (now_v - ly_v) if (np.isfinite(now_v) and np.isfinite(ly_v)) else np.nan
+                gaps_pp.append(gap_pp)
+                rows_tbl.append({
+                    "Hito": f"D-{D}",
+                    "Occ % actual": (f"{now_v:.1f}%" if np.isfinite(now_v) else "—"),
+                    "Occ % LY":     (f"{ly_v:.1f}%"  if np.isfinite(ly_v)  else "—"),
+                    "Gap (p.p.)":   (f"{gap_pp:+.1f}" if np.isfinite(gap_pp) else "—"),
+                })
+
+            df_hitos = pd.DataFrame(rows_tbl, columns=["Hito", "Occ % actual", "Occ % LY", "Gap (p.p.)"])
+            st.dataframe(df_hitos, use_container_width=True, hide_index=True)
+
+            # Veredicto simple del pace
+            gaps_valid = [g for g in gaps_pp if np.isfinite(g)]
+            if gaps_valid:
+                above = sum(g >= 5 for g in gaps_valid)
+                below = sum(g <= -5 for g in gaps_valid)
+                if below >= max(2, len(gaps_valid)//2 + 1):
+                    pace_veredicto = "🔴 Pickup retrasado"
+                    pace_explain   = "La ocupación a igual anticipación está por **debajo** de LY en la mayoría de hitos."
+                elif above >= max(2, len(gaps_valid)//2 + 1):
+                    pace_veredicto = "🟢 Pickup adelantado"
+                    pace_explain   = "La ocupación a igual anticipación está por **encima** de LY en la mayoría de hitos."
+                else:
+                    pace_veredicto = "🟠 Pickup en línea"
+                    pace_explain   = "Diferencias pequeñas o mixtas según el hito."
+
+                num_txt = " · ".join(
+                    [f"D-{milestones_full[i]}: {(('+' if gaps_pp[i]>=0 else '') + f'{gaps_pp[i]:.1f}') if np.isfinite(gaps_pp[i]) else '—'} p.p."
+                     for i in range(len(milestones_full))]
+                )
+                st.markdown(
+                    f"**Veredicto Pace:** {pace_veredicto}  \n"
+                    f"{pace_explain}  \n"
+                    f"_Detalle_: {num_txt}"
+                )
+            else:
+                st.info("No hay datos suficientes para la interpretación rápida del pace.")
+
         else:
             st.info("No hay datos suficientes para comparar el ritmo con LY en este periodo.")
 
